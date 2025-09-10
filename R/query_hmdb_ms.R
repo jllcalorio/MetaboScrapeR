@@ -18,7 +18,7 @@
 #'   One of `"Da"` or `"ppm"`. Default = `"ppm"`.
 #' @param ccs_predictors Character string or vector. CCS prediction model(s).
 #'   Examples: `"AllCCS"`, `"DarkChem"`, `"DeepCCS"`. Default = `NULL`.
-#' @param ccs_tolerance Numeric. CCS tolerance value. Default = `NULL`.
+#' @param ccs_tolerance Numeric. CCS tolerance value. Choose between c(1, 3, 5, 10). Default = `NULL`.
 #'
 #' @return A list with two data frames:
 #'   \itemize{
@@ -54,7 +54,7 @@
 #' }
 #'
 #' @seealso \url{https://www.hmdb.ca/spectra/ms/search}
-#' @author Your Name
+#' @author John Lennon L. Calorio
 #' @export
 query_hmdb_ms <- function(mz_rt = NULL,
                           ion_mode = "Positive",
@@ -64,8 +64,66 @@ query_hmdb_ms <- function(mz_rt = NULL,
                           ccs_predictors = NULL,
                           ccs_tolerance = NULL) {
 
+  # Disable debugging
+  options(debug = FALSE)
+
   # Force messages to output in console
   utils::flush.console()
+
+  # Validate input parameters
+  # Check required parameters
+  if (is.null(mz_rt) || length(mz_rt) == 0) {
+    stop("Argument 'mz_rt' must be provided and non-empty.", call. = FALSE)
+  }
+
+  # Validate mz_rt format
+  invalid_mz_rt <- !grepl("^[0-9.]+@[0-9.]+$", mz_rt)
+  if (any(invalid_mz_rt)) {
+    stop("Invalid mz_rt format. Expected 'mz@rt' format (e.g., '515.2597@10.7733'). ",
+         "Invalid entries: ", paste(mz_rt[invalid_mz_rt], collapse = ", "),
+         call. = FALSE)
+  }
+
+  # Validate ion_mode
+  valid_ion_modes <- c("Positive", "Negative", "Neutral")
+  if (!ion_mode %in% valid_ion_modes) {
+    stop("ion_mode must be one of: ", paste(valid_ion_modes, collapse = ", "),
+         call. = FALSE)
+  }
+
+  # Validate tolerance
+  if (!is.numeric(tolerance) || tolerance <= 0) {
+    stop("tolerance must be a positive numeric value.", call. = FALSE)
+  }
+
+  # Validate tolerance_units
+  valid_tolerance_units <- c("Da", "ppm")
+  if (!tolerance_units %in% valid_tolerance_units) {
+    stop("tolerance_units must be one of: ", paste(valid_tolerance_units, collapse = ", "),
+         call. = FALSE)
+  }
+
+  # Validate CCS predictors if provided
+  if (!is.null(ccs_predictors)) {
+    valid_ccs_predictors <- c("AllCCS", "DarkChem", "DeepCCS")
+    if (!ccs_predictors %in% valid_ccs_tolerance) {
+      stop("ccs_predictors must be one of: ", paste(valid_ccs_predictors, collapse = ", "),
+           call. = FALSE)
+    }
+  } else {
+    ccs_predictors <- NA
+  }
+
+  # Validate CCS tolerance if provided
+  if (!is.null(ccs_tolerance)) {
+    valid_ccs_tolerance <- c(1, 3, 5, 10)
+    if (!ccs_tolerance %in% valid_ccs_tolerance) {
+      stop("ccs_tolerance must be one of: ", paste(valid_ccs_tolerance, collapse = ", "),
+           call. = FALSE)
+    }
+  } else {
+    ccs_tolerance <- NA
+  }
 
   # Load packages safely
   if (!requireNamespace("rvest", quietly = TRUE)) stop("Package 'rvest' required.")
@@ -77,21 +135,14 @@ query_hmdb_ms <- function(mz_rt = NULL,
   # Early exit if no mz_rt is given
   if (is.null(mz_rt)) stop("Argument 'mz_rt' must be provided.")
 
+  # Manage Docker container for Selenium
   # Check if a container for selenium/standalone-chrome is already running
-  # We use system() to execute a shell command and capture its output
-  container_id <- system("docker run -d -p 4444:4444 -p 5900:5900 selenium/standalone-chrome", intern = TRUE)
-
-  # The intern = TRUE argument captures the output as a character vector.
-  # If the vector is empty, no running container was found.
-  if (length(container_id) == 0) {
-    # No running container found, so run the command
+  if (length("docker run -d -p 4444:4444 -p 5900:5900 selenium/standalone-chrome") == 0) {
     system("docker run -d -p 4444:4444 -p 5900:5900 selenium/standalone-chrome")
-    print("Started a new selenium/standalone-chrome container.")
+    message("Started a new selenium/standalone-chrome container.")
   } else {
-    # A container is already running
-    print("A selenium/standalone-chrome container is already running.")
+    message("A selenium/standalone-chrome container is already running.")
   }
-
 
   # Read website and extract form
   static <- rvest::read_html("https://www.hmdb.ca/spectra/ms/search")
@@ -109,7 +160,6 @@ query_hmdb_ms <- function(mz_rt = NULL,
       rvest::html_text(res, trim = TRUE)
     }
 
-    # The ones in double quotation marks are CSS selectors found using the SelectorGadget tool
     data.frame(
       Compound = compound_id,
       URL = url,
@@ -139,8 +189,8 @@ query_hmdb_ms <- function(mz_rt = NULL,
       ms_search_ion_mode = tolower(ion_mode),
       tolerance = tolerance,
       tolerance_units = tolerance_units,
-      ccs_predictors = ccs_predictors,
-      ccs_tolerance = ccs_tolerance
+      ccs_predictors = ifelse(is.na(ccs_predictors), "", ccs_predictors),
+      ccs_tolerance = ifelse(is.na(ccs_tolerance), "", ccs_tolerance)
     )
 
     form_submit <- rvest::html_form_submit(form_set, submit = "commit")
@@ -164,30 +214,45 @@ query_hmdb_ms <- function(mz_rt = NULL,
       results_table
     }
 
+    # Filter included
+    results_table <- results_table %>%
+      filter(Adduct %in% filter_adduct_type)
+
     # Scrape compound metadata
     compound_ids <- results_table$Compound
     compound_metadata <- purrr::map_df(compound_ids, get_compound_info)
 
-    results <- list(compound_metadata = compound_metadata,
-                    results_table_excluded = results_table_excluded)
+    # Metadata information
+    metadata <- data.frame(
+      Ion = rep(ion_mode, dim(compound_metadata)[1]),
+      MZ = rep(mz, dim(compound_metadata)[1]),
+      RT = rep(rt, dim(compound_metadata)[1]),
+      Tolerance = rep(tolerance, dim(compound_metadata)[1]),
+      Unit = rep(tolerance_units, dim(compound_metadata)[1]),
+      CCS_Predictors = rep(ccs_predictors, dim(compound_metadata)[1]),
+      CCS_Tolerance = rep(ccs_tolerance, dim(compound_metadata)[1])
+    )
 
-    return(results)
+    # Combine result table and metadata
+    compound_metadata <- cbind(metadata, compound_metadata)
+
+    list(compound_metadata = compound_metadata,
+         results_table_excluded = results_table_excluded)
   })
 
   # Combine results from multiple mz_rt values
   compound_metadata_all <- do.call(rbind, lapply(results_list, `[[`, "compound_metadata"))
   results_excluded_all <- do.call(rbind, lapply(results_list, `[[`, "results_table_excluded"))
 
-
-  # # Number of rows of original results table
-  nrow <- dim(compound_metadata_all)[1]
-
+  # Report
+  nrow <- nrow(compound_metadata_all)
   message(sprintf("There are %d compound/s found before filtering of adducts was applied.", nrow))
 
-  # # Number of rows of filtered results table
-  nrow_filtered <- dim(results_excluded_all)[1]
-
-  message(sprintf("There were %d compound/s excluded after filtering of adducts was applied. There are now only %d compounds remaining.", nrow_filtered, nrow - nrow_filtered))
+  nrow_filtered <- nrow(results_excluded_all)
+  message(sprintf(
+    "There were %d compound/s excluded after filtering of adducts was applied. There are now only %d compounds remaining.",
+    nrow_filtered, nrow - nrow_filtered
+  ))
 
   return(list(compound_metadata = compound_metadata_all,
               results_table_excluded = results_excluded_all))
