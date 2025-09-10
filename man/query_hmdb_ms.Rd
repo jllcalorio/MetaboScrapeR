@@ -33,7 +33,7 @@ One of \code{"Da"} or \code{"ppm"}. Default = \code{"ppm"}.}
 \item{ccs_predictors}{Character string or vector. CCS prediction model(s).
 Examples: \code{"AllCCS"}, \code{"DarkChem"}, \code{"DeepCCS"}. Default = \code{NULL}.}
 
-\item{ccs_tolerance}{Numeric. CCS tolerance value. Default = \code{NULL}.}
+\item{ccs_tolerance}{Numeric. CCS tolerance value. Choose between c(1, 3, 5, 10). Default = \code{NULL}.}
 }
 \value{
 A list with two data frames:
@@ -75,5 +75,5 @@ head(results$results_table_excluded)
 \url{https://www.hmdb.ca/spectra/ms/search}
 }
 \author{
-Your Name
+John Lennon L. Calorio
 }
