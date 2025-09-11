@@ -46,8 +46,9 @@ do not match the provided filter list.
 }
 \description{
 This function queries the Human Metabolome Database (HMDB) Mass Spectrometry
-(MS) search interface using provided m/z and retention time (RT), ion mode,
-adduct filters, and optional collision cross section (CCS) parameters.
+(MS) search interface (specifically at 'LC-MS Search') using provided m/z and
+retention time (RT), ion mode, adduct filters, tolerance levels,
+and optional collision cross section (CCS) parameters.
 It returns both detailed compound metadata from individual HMDB metabolite
 pages and the excluded results table (those adducts not in the filter list).
 }
@@ -72,7 +73,7 @@ head(results$results_table_excluded)
 
 }
 \seealso{
-\url{https://www.hmdb.ca/spectra/ms/search}
+The HMDB website \url{https://www.hmdb.ca/spectra/ms/search} and \url{https://www.docker.com/products/docker-desktop/} to download the Docker Desktop to be able to use this function.
 }
 \author{
 John Lennon L. Calorio
