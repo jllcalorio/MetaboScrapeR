@@ -1,11 +1,10 @@
 Package: MetaboScrapeR
-Title: What the Package Does (One Line, Title Case)
+Title: Perform Web Scraping on the Human Metabolome Database (HMDB) on R
 Version: 0.0.0.9000
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person("John Lennon", "Calorio", , "jllcalorio@gmail.com", role = c("aut", "cre"))
+Description: Scrape the Human Metabolome Database (HMDB).
+License: MIT + file LICENSEe
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
