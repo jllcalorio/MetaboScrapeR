@@ -1,8 +1,9 @@
 #' Query HMDB MS Spectra and Retrieve Compound Metadata
 #'
 #' This function queries the Human Metabolome Database (HMDB) Mass Spectrometry
-#' (MS) search interface using provided m/z and retention time (RT), ion mode,
-#' adduct filters, and optional collision cross section (CCS) parameters.
+#' (MS) search interface (specifically at 'LC-MS Search') using provided m/z and
+#' retention time (RT), ion mode, adduct filters, tolerance levels,
+#' and optional collision cross section (CCS) parameters.
 #' It returns both detailed compound metadata from individual HMDB metabolite
 #' pages and the excluded results table (those adducts not in the filter list).
 #'
@@ -53,7 +54,7 @@
 #' head(results$results_table_excluded)
 #' }
 #'
-#' @seealso \url{https://www.hmdb.ca/spectra/ms/search}
+#' @seealso The HMDB website \url{https://www.hmdb.ca/spectra/ms/search} and \url{https://www.docker.com/products/docker-desktop/} to download the Docker Desktop to be able to use this function.
 #' @author John Lennon L. Calorio
 #' @export
 query_hmdb_ms <- function(mz_rt = NULL,
@@ -106,8 +107,8 @@ query_hmdb_ms <- function(mz_rt = NULL,
   # Validate CCS predictors if provided
   if (!is.null(ccs_predictors)) {
     valid_ccs_predictors <- c("AllCCS", "DarkChem", "DeepCCS")
-    if (!ccs_predictors %in% valid_ccs_tolerance) {
-      stop("ccs_predictors must be one of: ", paste(valid_ccs_predictors, collapse = ", "),
+    if (!all(ccs_predictors %in% valid_ccs_predictors)) {
+      stop("ccs_predictors must be one or more of: ", paste(valid_ccs_predictors, collapse = ", "),
            call. = FALSE)
     }
   } else {
@@ -125,7 +126,7 @@ query_hmdb_ms <- function(mz_rt = NULL,
     ccs_tolerance <- NA
   }
 
-  # Load packages safely
+  # Check for `rvest` and `httr` packages
   if (!requireNamespace("rvest", quietly = TRUE)) stop("Package 'rvest' required.")
   if (!requireNamespace("stringr", quietly = TRUE)) stop("Package 'stringr' required.")
   if (!requireNamespace("dplyr", quietly = TRUE)) stop("Package 'dplyr' required.")
@@ -134,15 +135,6 @@ query_hmdb_ms <- function(mz_rt = NULL,
 
   # Early exit if no mz_rt is given
   if (is.null(mz_rt)) stop("Argument 'mz_rt' must be provided.")
-
-  # Manage Docker container for Selenium
-  # Check if a container for selenium/standalone-chrome is already running
-  if (length("docker run -d -p 4444:4444 -p 5900:5900 selenium/standalone-chrome") == 0) {
-    system("docker run -d -p 4444:4444 -p 5900:5900 selenium/standalone-chrome")
-    message("Started a new selenium/standalone-chrome container.")
-  } else {
-    message("A selenium/standalone-chrome container is already running.")
-  }
 
   # Read website and extract form
   static <- rvest::read_html("https://www.hmdb.ca/spectra/ms/search")
@@ -174,6 +166,8 @@ query_hmdb_ms <- function(mz_rt = NULL,
       Molecular_Framework = safe_text("tbody:nth-child(1) tr:nth-child(31) td"),
       External_Descriptors = safe_text("tbody:nth-child(1) tr:nth-child(32) td"),
       Disposition = safe_text("#ontology~ tr:nth-child(35) td"),
+      Process = safe_text("tr:nth-child(36) td"),
+      Pathway_Name = safe_text("#metabolite-pathway-links td:nth-child(1)"),
       stringsAsFactors = FALSE
     )
   }
@@ -207,6 +201,13 @@ query_hmdb_ms <- function(mz_rt = NULL,
 
     if (is.null(results_table)) return(NULL)
 
+    # Clean the "Adduct M/Z" column
+    results_table <- results_table %>%
+      dplyr::mutate(
+        `Adduct M/Z` = stringr::str_replace(`Adduct M/Z`, "m/z calculator", "") %>%
+          trimws()
+      )
+
     # Filter excluded
     results_table_excluded <- if (!is.null(filter_adduct_type)) {
       dplyr::filter(results_table, !Adduct %in% filter_adduct_type)
@@ -221,6 +222,9 @@ query_hmdb_ms <- function(mz_rt = NULL,
     # Scrape compound metadata
     compound_ids <- results_table$Compound
     compound_metadata <- purrr::map_df(compound_ids, get_compound_info)
+
+    # JOIN the included results with the scraped metadata
+    compound_metadata <- dplyr::left_join(results_table, compound_metadata, by = "Compound")
 
     # Metadata information
     metadata <- data.frame(
@@ -245,7 +249,7 @@ query_hmdb_ms <- function(mz_rt = NULL,
   results_excluded_all <- do.call(rbind, lapply(results_list, `[[`, "results_table_excluded"))
 
   # Report
-  nrow <- nrow(compound_metadata_all)
+  nrow <- nrow(compound_metadata_all) + nrow(results_excluded_all)
   message(sprintf("There are %d compound/s found before filtering of adducts was applied.", nrow))
 
   nrow_filtered <- nrow(results_excluded_all)
