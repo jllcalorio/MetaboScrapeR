@@ -290,7 +290,6 @@ query_hmdb_ms <- function(mz_rt = NULL,
               results_table_excluded = results_excluded_all))
 }
 
-
 # ================================================================
 # UI
 # ================================================================
@@ -365,17 +364,14 @@ ui <- fluidPage(
                    min = 1,
                    step = 1),
 
-
       selectInput("tolerance_units_input",
                   "Tolerance Units",
                   choices = c("ppm", "Da"),
                   selected = "ppm"),
 
-
       checkboxGroupInput("ccs_predictors_input",
                          "CCS Predictors (Optional)",
                          choices = c("AllCCS", "DarkChem", "DeepCCS")),
-
 
       checkboxGroupInput("ccs_tolerance_input",
                          "CCS Tolerance (Optional)",
@@ -438,7 +434,6 @@ ui <- fluidPage(
           ")
         )
       ),
-
 
       tabsetPanel(
         id = "main_tabs",
@@ -535,7 +530,6 @@ ui <- fluidPage(
   )
 )
 
-
 # ================================================================
 # Server
 # ================================================================
@@ -585,7 +579,6 @@ server <- function(input, output, session) {
                        selected = "select")
 
   }, ignoreInit = FALSE) # Run on app start to set positive defaults
-
 
   # --- Main Query Logic ---
   results_data <- eventReactive(input$run_query, {
