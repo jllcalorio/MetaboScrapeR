@@ -1,0 +1,13 @@
+name: metaboscraper
+title: MetaboScrapeR
+username: jllcalorio
+account: jllcalorio
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 15414956
+bundleId: 11144048
+url: https://jllcalorio.shinyapps.io/metaboscraper/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: .github/ISSUE_TEMPLATE/bug_report.md|.github/ISSUE_TEMPLATE/custom.md|.github/ISSUE_TEMPLATE/feature_request.md|app2.R|CODE_OF_CONDUCT.md|hmdb_fail_HMDB0002577.html|hmdb_fail_HMDB0002579.html|hmdb_fail_HMDB0249736.html|hmdb_fail_HMDB0256563.html|hmdb_fail_HMDB0341324.html|LICENSE|README.md
