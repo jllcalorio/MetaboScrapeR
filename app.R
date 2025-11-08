@@ -1,3 +1,4 @@
+# Load all required packages
 library(shiny)
 library(shinyjs)
 library(DT)
@@ -25,7 +26,7 @@ fetch_metadata_via_scraping <- function(compound_ids) {
     return(data.frame())
   }
   safe_text <- function(page, sel) {
-    res <- page %>% rvest::html_element(sel)
+    res <- page |> rvest::html_element(sel)
     if (length(res) == 0 || is.na(res)) return(NA)
     rvest::html_text(res, trim = TRUE)
   }
@@ -39,7 +40,6 @@ fetch_metadata_via_scraping <- function(compound_ids) {
     on.exit(close(con)) # Use on.exit to ensure the connection is closed even if an error occurs
     
     tryCatch({
-      # Use read_html on the connection instead of the URL string
       page <- rvest::read_html(con) 
 
       data.frame(
@@ -71,7 +71,7 @@ fetch_metadata_via_scraping <- function(compound_ids) {
 }
 
 # ================================================================
-# Core Function: Query HMDB (same as original, kept intact)
+# Core Function: Query HMDB
 # ================================================================
 
 query_hmdb_ms <- function(mz_rt,
@@ -119,7 +119,7 @@ query_hmdb_ms <- function(mz_rt,
         }
         return(list(compound_metadata = data.frame(), results_table_excluded = data.frame()))
       }
-      results_table <- rvest::html_table(results_table_node, fill = TRUE) %>%
+      results_table <- rvest::html_table(results_table_node, fill = TRUE) |>
         setNames(c("Compound", "Name", "Formula", "Monoisotopic Mass", "Adduct", "Adduct M/Z", "Delta (ppm)", "CCS"))
       log_function(sprintf("Found %d initial matches for feature '%s'.", nrow(results_table), mz_entry))
       results_table$`Adduct M/Z` <- trimws(stringr::str_replace(results_table$`Adduct M/Z`, "m/z calculator", ""))
