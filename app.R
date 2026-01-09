@@ -91,6 +91,7 @@ query_hmdb_ms <- function(mz_rt,
     log_function("ERROR: The number of features exceeds the HMDB limit of 700. Please reduce your input.")
     stop("The number of features exceeds the HMDB limit of 700.", call. = FALSE)
   }
+  
   process_mz_rt <- function(mz_entry) {
     log_function(sprintf("=== Processing feature: %s ===", mz_entry))
     tryCatch({
@@ -103,14 +104,17 @@ query_hmdb_ms <- function(mz_rt,
         ccs_tolerance      = if (is.null(ccs_tolerance))  "" else as.character(ccs_tolerance),
         "commit" = "Search"
       )
+      
       log_function("Submitting search to HMDB...")
       Sys.sleep(0.5)
       resp                <- httr::POST("https://www.hmdb.ca/spectra/ms/search", body = form_values, encode = "form", httr::timeout(60))
       httr::stop_for_status(resp)
       results_page_raw    <- httr::content(resp, as = "text")
       results_page_parsed <- rvest::read_html(results_page_raw)
+      
       log_function("Search submitted. Parsing results page...")
       results_table_node  <- rvest::html_element(results_page_parsed, ".table")
+      
       if (inherits(results_table_node, "xml_missing")) {
         page_text <- rvest::html_text(results_page_parsed, trim = TRUE)
         if (grepl("No results were found", page_text, ignore.case = TRUE)) {
@@ -121,56 +125,69 @@ query_hmdb_ms <- function(mz_rt,
         return(list(compound_metadata = data.frame(), results_table_excluded = data.frame()))
       }
       
-      # FIXED: Parse table and handle column names more robustly
+      # FIXED: Parse table, flatten lists, and handle columns robustly
       results_table <- rvest::html_table(results_table_node, fill = TRUE)
       
-      # Clean column names and standardize them
-      colnames(results_table) <- trimws(colnames(results_table))
+      # SAFETY: Ensure it is a standard dataframe and flatten any list columns (common cause of write_xlsx failure)
+      results_table <- as.data.frame(lapply(results_table, function(x) {
+        if(is.list(x)) return(as.character(x)) else return(x)
+      }), stringsAsFactors = FALSE)
       
-      # Set expected column names (handle variations in actual table structure)
+      # Clean column names
+      colnames(results_table) <- trimws(colnames(results_table))
       expected_cols <- c("Compound", "Name", "Formula", "Monoisotopic Mass", "Adduct", "Adduct M/Z", "Delta (ppm)", "CCS")
       
-      # If we have 8 columns, assume they match our expected structure
-      if (ncol(results_table) == 8) {
+      # Logic: If 8 cols, assume standard. If >8, take first 8.
+      if (ncol(results_table) >= 8) {
+        results_table <- results_table[, 1:8] # specific fix to avoid index errors if extra hidden cols exist
         colnames(results_table) <- expected_cols
       } else {
-        # Log a warning if column count doesn't match
-        log_function(sprintf("WARNING: Expected 8 columns but found %d. Column names: %s", 
-                             ncol(results_table), 
-                             paste(colnames(results_table), collapse = ", ")))
+        log_function(sprintf("WARNING: Table has %d columns (expected 8). Skipping structure-dependent filtering.", ncol(results_table)))
       }
       
       log_function(sprintf("Found %d initial matches for feature '%s'.", nrow(results_table), mz_entry))
       
-      # FIXED: Only clean Adduct M/Z if it exists
+      # Clean Adduct M/Z if exists
       if ("Adduct M/Z" %in% colnames(results_table)) {
-        results_table$`Adduct M/Z` <- trimws(stringr::str_replace(results_table$`Adduct M/Z`, "m/z calculator", ""))
-      } else {
-        log_function("WARNING: 'Adduct M/Z' column not found in results table.")
+        results_table$`Adduct M/Z` <- trimws(stringr::str_replace(as.character(results_table$`Adduct M/Z`), "m/z calculator", ""))
       }
       
-      excluded <- if (!is.null(filter_adduct_type)) {
-        dplyr::filter(results_table, !Adduct %in% filter_adduct_type)
+      # SAFETY: Check if 'Adduct' column exists before filtering to prevent crash
+      has_adduct_col <- "Adduct" %in% colnames(results_table)
+      
+      if (has_adduct_col) {
+        excluded <- if (!is.null(filter_adduct_type)) {
+          dplyr::filter(results_table, !Adduct %in% filter_adduct_type)
+        } else {
+          data.frame()
+        }
+        included <- if (!is.null(filter_adduct_type)) {
+          dplyr::filter(results_table, Adduct %in% filter_adduct_type)
+        } else {
+          results_table
+        }
+        if (!is.null(filter_adduct_type)) {
+          log_function(sprintf("Filtered %d matches by adduct type. %d matches remaining.", nrow(excluded), nrow(included)))
+        }
       } else {
-        data.frame()
+        # Fallback if column renaming failed
+        log_function("WARNING: 'Adduct' column missing. Returning all results without filtering.")
+        included <- results_table
+        excluded <- data.frame() 
       }
-      included <- if (!is.null(filter_adduct_type)) {
-        dplyr::filter(results_table, Adduct %in% filter_adduct_type)
-      } else {
-        results_table
-      }
-      if (!is.null(filter_adduct_type)) {
-        log_function(sprintf("Filtered %d matches by adduct type. %d matches remaining.", nrow(excluded), nrow(included)))
-      }
+      
       compound_ids <- included$Compound
-      if(length(compound_ids) > 0) {
+      
+      # Ensure compound_ids is not NULL or NA before length check
+      if(!is.null(compound_ids) && length(compound_ids) > 0) {
         log_function(sprintf("Fetching detailed metadata for %d compound(s) via web scraping...", length(compound_ids)))
         Sys.sleep(0.5)
         compound_metadata <- fetch_metadata_via_scraping(compound_ids)
       } else {
-        log_function("No compounds remaining after filtering. Skipping metadata fetch.")
+        log_function("No compounds remaining after filtering (or IDs missing). Skipping metadata fetch.")
         compound_metadata <- data.frame()
       }
+      
       final_metadata <- if (nrow(compound_metadata) > 0) {
         dplyr::left_join(included, compound_metadata, by = "Compound")
       } else if (nrow(included) > 0) {
@@ -178,32 +195,32 @@ query_hmdb_ms <- function(mz_rt,
       } else {
         data.frame()
       }
+      
+      # Prepare Query Meta - ensure types match for binding
       query_meta <- data.frame(
-        Ion              = ion_mode,
-        MZ               = form_values$query_masses,
+        Ion              = as.character(ion_mode),
+        MZ               = as.numeric(form_values$query_masses),
         RT               = as.numeric(stringr::str_extract(mz_entry, "[^@]+$")),
         stringsAsFactors = FALSE
       )
+      
       if (nrow(final_metadata) > 0) {
-        final_metadata <- cbind(query_meta, final_metadata)
+        final_metadata <- dplyr::bind_cols(query_meta, final_metadata)
       }
+      
       if (nrow(excluded) > 0) {
-        excluded <- cbind(
-          data.frame(
-            MZ               = form_values$query_masses,
-            RT               = as.numeric(stringr::str_extract(mz_entry, "[^@]+$")),
-            stringsAsFactors = FALSE
-          ),
-          excluded
-        )
+        excluded <- dplyr::bind_cols(query_meta, excluded)
       }
+      
       log_function(sprintf("=== Finished processing feature: %s. Found %d valid compounds. ===\n", mz_entry, nrow(final_metadata)))
       return(list(compound_metadata = final_metadata, results_table_excluded = excluded))
+      
     }, error = function(e) {
       log_function(sprintf("ERROR: Failed to process feature '%s': %s", mz_entry, e$message))
       return(list(compound_metadata = data.frame(), results_table_excluded = data.frame()))
     })
   }
+  
   results_list          <- lapply(mz_rt, process_mz_rt)
   compound_metadata_all <- do.call(rbind, lapply(results_list, `[[`, "compound_metadata"))
   results_excluded_all  <- do.call(rbind, lapply(results_list, `[[`, "results_table_excluded"))
@@ -757,11 +774,8 @@ server <- function(input, output, session) {
       
       # Handle cases with no data
       if (is.null(res_data) || (nrow(res_data$compound_metadata) == 0 && nrow(res_data$results_table_excluded) == 0)) {
-        showNotification("No data available to download.", type = "warning", duration = 5)
-        # Create a dummy empty excel to prevent browser error if user forces download
-        tmp <- tempfile(fileext = ".xlsx")
-        writexl::write_xlsx(list("Info" = data.frame(Message = "No data available")), path = tmp)
-        file.rename(tmp, file)
+        # Create a dummy empty excel
+        writexl::write_xlsx(list("Info" = data.frame(Message = "No data available")), path = file)
         return()
       }
       
@@ -771,16 +785,24 @@ server <- function(input, output, session) {
         data.frame(Log = "No log data available.", stringsAsFactors = FALSE)
       }
       
+      # Helper to flatten list columns to character to prevent writexl crash
+      clean_for_excel <- function(df) {
+        if (is.null(df) || nrow(df) == 0) return(data.frame(Message = "No data"))
+        df[] <- lapply(df, function(x) {
+          if (is.list(x)) return(vapply(x, toString, character(1))) # Convert list cols to string
+          return(x)
+        })
+        return(df)
+      }
+      
       data_list <- list(
-        "Compound_Metadata" = if(nrow(res_data$compound_metadata)      == 0) data.frame(Message="No compounds found matching filter") else res_data$compound_metadata,
-        "Excluded_Results"  = if(nrow(res_data$results_table_excluded) == 0) data.frame(Message="No results were excluded")           else res_data$results_table_excluded,
-        "Logs" = log_df
+        "Compound_Metadata" = clean_for_excel(res_data$compound_metadata),
+        "Excluded_Results"  = clean_for_excel(res_data$results_table_excluded),
+        "Logs"              = log_df
       )
       
-      # FIXED: Write to a temp file with .xlsx extension first, then move it
-      tmp <- tempfile(fileext = ".xlsx")
-      writexl::write_xlsx(data_list, path = tmp)
-      file.rename(tmp, file)
+      # Write directly to the file path provided by Shiny
+      writexl::write_xlsx(data_list, path = file)
     }
   )
 }
