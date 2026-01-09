@@ -26,7 +26,7 @@ fetch_metadata_via_scraping <- function(compound_ids) {
     return(data.frame())
   }
   safe_text <- function(page, sel) {
-    res <- page |> rvest::html_element(sel)
+    res <- page %>% rvest::html_element(sel)
     if (length(res) == 0 || is.na(res)) return(NA)
     rvest::html_text(res, trim = TRUE)
   }
@@ -34,33 +34,34 @@ fetch_metadata_via_scraping <- function(compound_ids) {
   # Use an anonymous function inside future_map_dfr to ensure cleanup
   metadata_df <- furrr::future_map_dfr(compound_ids, ~ {
     compound_id <- .x
-    url <- paste0("https://www.hmdb.ca/metabolites/", compound_id)
+    url         <- paste0("https://www.hmdb.ca/metabolites/", compound_id)
     
     con <- base::url(url, "rb") # Open the connection in binary mode
-    on.exit(close(con)) # Use on.exit to ensure the connection is closed even if an error occurs
+    on.exit(close(con))         # Use on.exit to ensure the connection is closed even if an error occurs
     
     tryCatch({
+      # Use read_html on the connection instead of the URL string
       page <- rvest::read_html(con) 
-
+      
       data.frame(
-        Compound = compound_id,
-        URL = url,
-        Description = safe_text(page, ".met-desc"),
-        Kingdom = safe_text(page, "#taxonomy~ tr:nth-child(24) td"),
-        SuperClass = safe_text(page, "tbody:nth-child(1) tr:nth-child(25) td"),
-        Class = safe_text(page, "tbody:nth-child(1) tr:nth-child(26) td"),
-        Subclass = safe_text(page, "tbody:nth-child(1) tr:nth-child(27) td"),
-        Direct_Parent = safe_text(page, "tbody:nth-child(1) tr:nth-child(28) td"),
-        Alternative_Parent = safe_text(page, "tr:nth-child(29) ul"),
-        Substituents = safe_text(page, "tr:nth-child(30) ul"),
-        Molecular_Framework = safe_text(page, "tbody:nth-child(1) tr:nth-child(31) td"),
-        External_Descriptors = safe_text(page, "tbody:nth-child(1) tr:nth-child(32) td"),
-        Pathway_Name = safe_text(page, "#metabolite-pathway-links th:nth-child(1)"),
+        Compound               = compound_id,
+        URL                    = url,
+        Description            = safe_text(page, ".met-desc"),
+        Kingdom                = safe_text(page, "#taxonomy~ tr:nth-child(24) td"),
+        SuperClass             = safe_text(page, "tbody:nth-child(1) tr:nth-child(25) td"),
+        Class                  = safe_text(page, "tbody:nth-child(1) tr:nth-child(26) td"),
+        Subclass               = safe_text(page, "tbody:nth-child(1) tr:nth-child(27) td"),
+        Direct_Parent          = safe_text(page, "tbody:nth-child(1) tr:nth-child(28) td"),
+        Alternative_Parent     = safe_text(page, "tr:nth-child(29) ul"),
+        Substituents           = safe_text(page, "tr:nth-child(30) ul"),
+        Molecular_Framework    = safe_text(page, "tbody:nth-child(1) tr:nth-child(31) td"),
+        External_Descriptors   = safe_text(page, "tbody:nth-child(1) tr:nth-child(32) td"),
+        Pathway_Name           = safe_text(page, "#metabolite-pathway-links th:nth-child(1)"),
         Pathway_SMPDB_PathBank = safe_text(page, "#metabolite-pathway-links th:nth-child(2)"),
-        Pathway_KEGG = safe_text(page, "#metabolite-pathway-links th~ th+ th"),
-        Disposition = safe_text(page, "#ontology~ tr:nth-child(35) td"),
-        Process = safe_text(page, "tr:nth-child(36) td"),
-        stringsAsFactors = FALSE
+        Pathway_KEGG           = safe_text(page, "#metabolite-pathway-links th~ th+ th"),
+        Disposition            = safe_text(page, "#ontology~ tr:nth-child(35) td"),
+        Process                = safe_text(page, "tr:nth-child(36) td"),
+        stringsAsFactors       = FALSE
       )
     }, error = function(e) {
       warning(sprintf("Could not fetch data for HMDB ID %s: %s", compound_id, e$message), call. = FALSE)
@@ -71,7 +72,7 @@ fetch_metadata_via_scraping <- function(compound_ids) {
 }
 
 # ================================================================
-# Core Function: Query HMDB
+# Core Function: Query HMDB (same as original, kept intact)
 # ================================================================
 
 query_hmdb_ms <- function(mz_rt,
@@ -94,22 +95,22 @@ query_hmdb_ms <- function(mz_rt,
     log_function(sprintf("=== Processing feature: %s ===", mz_entry))
     tryCatch({
       form_values <- list(
-        query_masses = as.numeric(stringr::str_extract(mz_entry, "^[^@]+")),
+        query_masses       = as.numeric(stringr::str_extract(mz_entry, "^[^@]+")),
         ms_search_ion_mode = tolower(ion_mode),
-        tolerance = tolerance,
-        tolerance_units = tolerance_units,
-        ccs_predictors = if (is.null(ccs_predictors)) "" else ccs_predictors,
-        ccs_tolerance = if (is.null(ccs_tolerance)) "" else as.character(ccs_tolerance),
+        tolerance          = tolerance,
+        tolerance_units    = tolerance_units,
+        ccs_predictors     = if (is.null(ccs_predictors)) "" else ccs_predictors,
+        ccs_tolerance      = if (is.null(ccs_tolerance))  "" else as.character(ccs_tolerance),
         "commit" = "Search"
       )
       log_function("Submitting search to HMDB...")
       Sys.sleep(0.5)
-      resp <- httr::POST("https://www.hmdb.ca/spectra/ms/search", body = form_values, encode = "form", httr::timeout(60))
+      resp                <- httr::POST("https://www.hmdb.ca/spectra/ms/search", body = form_values, encode = "form", httr::timeout(60))
       httr::stop_for_status(resp)
-      results_page_raw <- httr::content(resp, as = "text")
+      results_page_raw    <- httr::content(resp, as = "text")
       results_page_parsed <- rvest::read_html(results_page_raw)
       log_function("Search submitted. Parsing results page...")
-      results_table_node <- rvest::html_element(results_page_parsed, ".table")
+      results_table_node  <- rvest::html_element(results_page_parsed, ".table")
       if (inherits(results_table_node, "xml_missing")) {
         page_text <- rvest::html_text(results_page_parsed, trim = TRUE)
         if (grepl("No results were found", page_text, ignore.case = TRUE)) {
@@ -119,10 +120,35 @@ query_hmdb_ms <- function(mz_rt,
         }
         return(list(compound_metadata = data.frame(), results_table_excluded = data.frame()))
       }
-      results_table <- rvest::html_table(results_table_node, fill = TRUE) |>
-        setNames(c("Compound", "Name", "Formula", "Monoisotopic Mass", "Adduct", "Adduct M/Z", "Delta (ppm)", "CCS"))
+      
+      # FIXED: Parse table and handle column names more robustly
+      results_table <- rvest::html_table(results_table_node, fill = TRUE)
+      
+      # Clean column names and standardize them
+      colnames(results_table) <- trimws(colnames(results_table))
+      
+      # Set expected column names (handle variations in actual table structure)
+      expected_cols <- c("Compound", "Name", "Formula", "Monoisotopic Mass", "Adduct", "Adduct M/Z", "Delta (ppm)", "CCS")
+      
+      # If we have 8 columns, assume they match our expected structure
+      if (ncol(results_table) == 8) {
+        colnames(results_table) <- expected_cols
+      } else {
+        # Log a warning if column count doesn't match
+        log_function(sprintf("WARNING: Expected 8 columns but found %d. Column names: %s", 
+                             ncol(results_table), 
+                             paste(colnames(results_table), collapse = ", ")))
+      }
+      
       log_function(sprintf("Found %d initial matches for feature '%s'.", nrow(results_table), mz_entry))
-      results_table$`Adduct M/Z` <- trimws(stringr::str_replace(results_table$`Adduct M/Z`, "m/z calculator", ""))
+      
+      # FIXED: Only clean Adduct M/Z if it exists
+      if ("Adduct M/Z" %in% colnames(results_table)) {
+        results_table$`Adduct M/Z` <- trimws(stringr::str_replace(results_table$`Adduct M/Z`, "m/z calculator", ""))
+      } else {
+        log_function("WARNING: 'Adduct M/Z' column not found in results table.")
+      }
+      
       excluded <- if (!is.null(filter_adduct_type)) {
         dplyr::filter(results_table, !Adduct %in% filter_adduct_type)
       } else {
@@ -153,9 +179,9 @@ query_hmdb_ms <- function(mz_rt,
         data.frame()
       }
       query_meta <- data.frame(
-        Ion = ion_mode,
-        MZ = form_values$query_masses,
-        RT = as.numeric(stringr::str_extract(mz_entry, "[^@]+$")),
+        Ion              = ion_mode,
+        MZ               = form_values$query_masses,
+        RT               = as.numeric(stringr::str_extract(mz_entry, "[^@]+$")),
         stringsAsFactors = FALSE
       )
       if (nrow(final_metadata) > 0) {
@@ -164,8 +190,8 @@ query_hmdb_ms <- function(mz_rt,
       if (nrow(excluded) > 0) {
         excluded <- cbind(
           data.frame(
-            MZ = form_values$query_masses,
-            RT = as.numeric(stringr::str_extract(mz_entry, "[^@]+$")),
+            MZ               = form_values$query_masses,
+            RT               = as.numeric(stringr::str_extract(mz_entry, "[^@]+$")),
             stringsAsFactors = FALSE
           ),
           excluded
@@ -178,12 +204,12 @@ query_hmdb_ms <- function(mz_rt,
       return(list(compound_metadata = data.frame(), results_table_excluded = data.frame()))
     })
   }
-  results_list <- lapply(mz_rt, process_mz_rt)
+  results_list          <- lapply(mz_rt, process_mz_rt)
   compound_metadata_all <- do.call(rbind, lapply(results_list, `[[`, "compound_metadata"))
-  results_excluded_all <- do.call(rbind, lapply(results_list, `[[`, "results_table_excluded"))
-  total_found <- nrow(compound_metadata_all) + nrow(results_excluded_all)
+  results_excluded_all  <- do.call(rbind, lapply(results_list, `[[`, "results_table_excluded"))
+  total_found           <- nrow(compound_metadata_all) + nrow(results_excluded_all)
   log_function(sprintf("=== Total compounds found before adduct filtering: %d ===", total_found))
-  n_excluded <- nrow(results_excluded_all)
+  n_excluded            <- nrow(results_excluded_all)
   if (n_excluded > 0) {
     log_function(sprintf("Excluded %d compound(s) based on adduct filter. %d remaining.", n_excluded, nrow(compound_metadata_all)))
   } else {
@@ -292,30 +318,31 @@ ui <- fluidPage(
       helpText("Enter m/z and RT values to query the HMDB."),
       textAreaInput("mz_rt_input",
                     "Features (m/z@RT)",
-                    value = "",
-                    rows = 4,
+                    value       = "",
+                    rows        = 4,
                     placeholder = "Example: 626.3547@95.2\n515.2597@10.7733",
-                    width = '100%'),
+                    width       = '100%'),
       helpText("Separate multiple features with newlines, commas, or both. Maximum 700 features allowed."),
       radioButtons("ion_mode_input",
                    "Ion Mode",
-                   choices = c("Positive", "Negative", "Neutral"),
+                   choices  = c("Positive", "Negative", "Neutral"),
                    selected = "Positive",
-                   inline = TRUE,
-                   width = '100%'),
+                   inline   = TRUE,
+                   width    = '100%'),
       radioButtons(
         "adduct_input_mode",
         "Adducts to Keep:",
-        choices = c("Select from list" = "select", "Paste comma-separated" = "paste"),
+        choices  = c("Select from list" = "select", 
+                     "Paste comma-separated" = "paste"),
         selected = "select",
-        inline = TRUE
+        inline   = TRUE
       ),
       conditionalPanel(
-        condition = "input.adduct_input_mode == 'select'",
+        condition  = "input.adduct_input_mode == 'select'",
         selectizeInput(
           "adduct_types_select",
           NULL,
-          choices = c(
+          choices  = c(
             "2M+2H+3H2O", "2M+ACN+H", "2M+ACN+Na", "2M+FA-H", "2M+H", "2M+H-H2O",
             "2M+K", "2M+Na", "2M-H", "3M-H", "M", "M+2ACN+2H", "M+2ACN+H", "M+2H",
             "M+2H+Na", "M+2K-H", "M+2Na", "M+2Na-H", "M+3ACN+2H", "M+3H",
@@ -328,46 +355,46 @@ ui <- fluidPage(
           ),
           selected = NULL,
           multiple = TRUE,
-          options = list(placeholder = 'Select adducts...'),
-          width = '100%'
+          options  = list(placeholder = 'Select adducts...'),
+          width    = '100%'
         )
       ),
       conditionalPanel(
-        condition = "input.adduct_input_mode == 'paste'",
+        condition     = "input.adduct_input_mode == 'paste'",
         textAreaInput(
           "adduct_types_paste",
           NULL,
-          value = "",
-          rows = 3,
+          value       = "",
+          rows        = 3,
           placeholder = "Example: M+H, M+Na, M+K",
-          width = '100%'
+          width       = '100%'
         )
       ),
       helpText("See Help section for the full list of adducts."),
       radioButtons("tolerance_units_input",
                    "Tolerance Units",
-                   choices = c("ppm", "Da"),
+                   choices  = c("ppm", "Da"),
                    selected = "ppm",
-                   inline = TRUE,
-                   width = '100%'),
+                   inline   = TRUE,
+                   width    = '100%'),
       numericInput("tolerance_input",
                    "Mass Tolerance Value",
                    value = 5,
-                   min = 0,
-                   step = 1,
+                   min   = 0,
+                   step  = 1,
                    width = '100%'),
       radioButtons("ccs_predictors_input",
                    "CCS Predictor (Optional)",
-                   choices = c("None" = "", "AllCCS", "DarkChem", "DeepCCS"),
+                   choices  = c("None" = "", "AllCCS", "DarkChem", "DeepCCS"),
                    selected = "",
-                   inline = TRUE,
-                   width = '100%'),
+                   inline   = TRUE,
+                   width    = '100%'),
       radioButtons("ccs_tolerance_input",
                    "CCS Tolerance (Optional)",
-                   choices = c("None" = "", "1", "3", "5", "10"),
+                   choices  = c("None" = "", "1", "3", "5", "10"),
                    selected = "",
-                   inline = TRUE,
-                   width = '100%'),
+                   inline   = TRUE,
+                   width    = '100%'),
       div(style = "display: flex; justify-content: space-between; gap: 10px;",
           actionButton("run_query", "Run Query", class = "btn-primary", icon = icon("play"), style = "width: 100%;")
       ),
@@ -389,12 +416,12 @@ ui <- fluidPage(
   # Main Panel (Scrollable independently)
   div(class = "main-container",
       shiny::fluidRow(
-        shiny::column(width = 12,
-                      align = "center",
-                      div(id = "loading-message",
+        shiny::column(width               = 12,
+                      align               = "center",
+                      div(id              = "loading-message",
                           HTML("<div class='spinner'></div>"),
                           tags$p("Querying HMDB... This may take several minutes per feature. Do not close the tab."),
-                          style = "display: none; color: #555; font-style: italic; margin-top: 15px;")
+                          style           = "display: none; color: #555; font-style: italic; margin-top: 15px;")
         )
       ),
       tabsetPanel(
@@ -429,7 +456,7 @@ ui <- fluidPage(
                      p("OR:"),
                      tags$pre("626.3547@95.2, 615.3753@120.5\n450.2315@80.0"),
                      
-                     # Ion Mode description and Adducts to Keep
+                     # Ion Mode description before Adducts to Keep
                      h4("Ion Mode"),
                      p("Select the ionization mode used in your experiment. This will automatically update the default 'Adducts to Keep' list."),
                      
@@ -476,7 +503,7 @@ ui <- fluidPage(
                        tags$li(strong("Logs:"), " Shows a detailed, timestamped log of the entire query process, updated in real-time.")
                      ),
                      
-                     # Note-box
+                     # Note-box after Output Tabs
                      div(class = "note-box",
                          tags$p(style = "margin: 0;",
                                 icon("info-circle"), " ", strong("Need Additional Features?"),
@@ -497,17 +524,17 @@ ui <- fluidPage(
 # Server
 # ================================================================
 server <- function(input, output, session) {
-  workers_available <- future::availableCores() - 1
+  workers_available                            <- future::availableCores() - 1
   if (workers_available < 1) workers_available <- 1
-  log_init_msg <- sprintf("[%s] Parallel backend initializing with %d workers...", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), workers_available)
+  log_init_msg                                 <- sprintf("[%s] Parallel backend initializing with %d workers...", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), workers_available)
   future::plan(future::multisession, workers = workers_available)
   
   rv <- reactiveValues(
-    is_running = FALSE,
-    results_data = NULL,
-    log_data = character(0),
+    is_running       = FALSE,
+    results_data     = NULL,
+    log_data         = character(0),
     query_successful = FALSE,
-    query_error = FALSE
+    query_error      = FALSE
   )
   
   append_log <- function(msg) {
@@ -517,7 +544,7 @@ server <- function(input, output, session) {
   
   positive_adducts <- c("M+H", "M+H-2H2O", "M+H-H2O", "M+Na", "M+CH3OH+H", "M+K", "M+ACN+H", "M+2Na-H", "M+ACN+Na", "M+2K-H", "M+2ACN+H", "M+H+HCOONa", "2M+H", "2M+Na", "2M+2H+3H2O", "2M+K", "2M+ACN+H", "2M+ACN+Na", "2M+H-H2O", "M+2H", "M+H+Na", "M+H+K", "M+ACN+2H", "M+2Na", "M+2ACN+2H", "M+3ACN+2H", "M+3H", "M+2H+Na", "M+H+2Na", "M+3Na", "M+H+2K")
   negative_adducts <- c("M-H", "M-H20-H", "M+Na-2H", "M+Cl", "M+K-2H", "M+FA-H", "M-H+HCOONa", "2M-H", "2M+FA-H", "3M-H", "M-2H", "M-3H")
-  neutral_adducts <- c("Unknown", "M")
+  neutral_adducts  <- c("Unknown", "M")
   
   observeEvent(input$ion_mode_input, {
     ion_mode <- input$ion_mode_input
@@ -559,6 +586,7 @@ server <- function(input, output, session) {
   # --- Dynamic tolerance value and step based on units ---
   observeEvent(input$tolerance_units_input, {
     if (input$tolerance_units_input == "ppm") {
+      # set a user-friendly value and step for ppm
       updateNumericInput(session, "tolerance_input", value = 5, step = 1)
     } else if (input$tolerance_units_input == "Da") {
       updateNumericInput(session, "tolerance_input", value = 0.05, step = 0.01)
@@ -571,17 +599,17 @@ server <- function(input, output, session) {
     # 1. Setup State and UI
     req(input$mz_rt_input)
     shinyjs::show("loading-message")
-    rv$is_running <- TRUE # Set immediately
+    rv$is_running       <- TRUE # Set immediately
     rv$query_successful <- FALSE
-    rv$query_error <- FALSE
-    rv$results_data <- NULL # Clear previous results
-    rv$log_data <- c(log_init_msg, sprintf("[%s] Starting query...", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
+    rv$query_error      <- FALSE
+    rv$results_data     <- NULL # Clear previous results
+    rv$log_data         <- c(log_init_msg, sprintf("[%s] Starting query...", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
     
     # 2. Prepare arguments
-    features_text <- input$mz_rt_input
+    features_text  <- input$mz_rt_input
     features_split <- strsplit(features_text, "[\n,]")[[1]]
-    mz_rt_vector <- trimws(features_split)
-    mz_rt_vector <- mz_rt_vector[mz_rt_vector != ""]
+    mz_rt_vector   <- trimws(features_split)
+    mz_rt_vector   <- mz_rt_vector[mz_rt_vector != ""]
     
     if(length(mz_rt_vector) == 0) {
       append_log(sprintf("[%s] ERROR: No valid features provided.", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
@@ -612,7 +640,7 @@ server <- function(input, output, session) {
     }
     
     ccs_predictors <- if(input$ccs_predictors_input == "") NULL else input$ccs_predictors_input
-    ccs_tolerance <- if(input$ccs_tolerance_input == "") NULL else as.numeric(input$ccs_tolerance_input)
+    ccs_tolerance  <- if(input$ccs_tolerance_input  == "") NULL else as.numeric(input$ccs_tolerance_input)
     if(!is.null(ccs_predictors)) {
       append_log(sprintf("[%s] Using CCS Predictor: %s", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ccs_predictors))
     }
@@ -623,15 +651,14 @@ server <- function(input, output, session) {
     # 3. Blocking Query Execution
     res <- tryCatch({
       query_hmdb_ms(
-        mz_rt = mz_rt_vector,
-        ion_mode = input$ion_mode_input,
+        mz_rt              = mz_rt_vector,
+        ion_mode           = input$ion_mode_input,
         filter_adduct_type = adducts_vector,
-        tolerance = input$tolerance_input,
-        tolerance_units = input$tolerance_units_input,
-        ccs_predictors = ccs_predictors,
-        ccs_tolerance = ccs_tolerance,
-        # Use real-time log function for blocking query
-        log_function = append_log 
+        tolerance          = input$tolerance_input,
+        tolerance_units    = input$tolerance_units_input,
+        ccs_predictors     = ccs_predictors,
+        ccs_tolerance      = ccs_tolerance,
+        log_function       = append_log # Use real-time log function for blocking query
       )
     }, error = function(e) {
       append_log(sprintf("[%s] ERROR during query execution: %s", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), conditionMessage(e)))
@@ -644,7 +671,7 @@ server <- function(input, output, session) {
     
     # 5. Process results and return
     if (is.null(res)) {
-      rv$query_error <- TRUE
+      rv$query_error      <- TRUE
       rv$query_successful <- FALSE
       return(NULL)
     } else {
@@ -653,9 +680,9 @@ server <- function(input, output, session) {
                          nrow(res$compound_metadata), 
                          nrow(res$results_table_excluded)))
       rv$query_successful <- TRUE
-      rv$results_data <- res # Set the final results
-      rv$query_error <- FALSE
-      return(res) # return results to results_data()
+      rv$results_data     <- res    # Set the final results
+      rv$query_error      <- FALSE
+      return(res)                   # return results to results_data()
     }
   })
   
@@ -664,7 +691,7 @@ server <- function(input, output, session) {
       rv$stop_requested <- TRUE
       append_log("User requested query interruption. Resetting UI state.")
       shinyjs::hide("loading-message")
-      rv$is_running <- FALSE
+      rv$is_running     <- FALSE
     }
   })
   
@@ -687,16 +714,16 @@ server <- function(input, output, session) {
       return(data.frame(Message = "No compounds found matching your criteria."))
     }
     DT::datatable(results_data()$compound_metadata,
-                  options = list(
-                    scrollX = TRUE,
+                  options      = list(
+                    scrollX    = TRUE,
                     pageLength = 25,
-                    autoWidth = TRUE,
+                    autoWidth  = TRUE,
                     columnDefs = list(list(className = 'dt-head-center', targets = '_all'))
                   ),
-                  rownames = FALSE,
-                  width = 150,
-                  height = 50,
-                  selection = 'none'
+                  rownames     = FALSE,
+                  width        = 150,
+                  height       = 50,
+                  selection    = 'none'
     )
   })
   
@@ -706,16 +733,16 @@ server <- function(input, output, session) {
       return(data.frame(Message = "No results were excluded by the adduct filter."))
     }
     DT::datatable(results_data()$results_table_excluded,
-                  options = list(
-                    scrollX = TRUE,
+                  options      = list(
+                    scrollX    = TRUE,
                     pageLength = 25,
-                    autoWidth = TRUE,
+                    autoWidth  = TRUE,
                     columnDefs = list(list(className = 'dt-head-center', targets = '_all'))
                   ),
-                  rownames = FALSE,
-                  width = 150,
-                  height = 50,
-                  selection = 'none'
+                  rownames     = FALSE,
+                  width        = 150,
+                  height       = 50,
+                  selection    = 'none'
     )
   })
   
@@ -725,7 +752,7 @@ server <- function(input, output, session) {
       paste("hmdb_results-", Sys.Date(), ".xlsx", sep = "")
     },
     content = function(file) {
-      res_data <- results_data()
+      res_data    <- results_data()
       current_log <- rv$log_data
       if (is.null(res_data) || (nrow(res_data$compound_metadata) == 0 && nrow(res_data$results_table_excluded) == 0)) {
         showNotification("No data available to download.", type = "warning", duration = 5)
@@ -737,8 +764,8 @@ server <- function(input, output, session) {
         data.frame(Log = "No log data available.", stringsAsFactors = FALSE)
       }
       data_list <- list(
-        "Compound_Metadata" = if(nrow(res_data$compound_metadata) == 0) data.frame(Message="No compounds found matching filter") else res_data$compound_metadata,
-        "Excluded_Results" = if(nrow(res_data$results_table_excluded) == 0) data.frame(Message="No results were excluded") else res_data$results_table_excluded,
+        "Compound_Metadata" = if(nrow(res_data$compound_metadata)      == 0) data.frame(Message="No compounds found matching filter") else res_data$compound_metadata,
+        "Excluded_Results"  = if(nrow(res_data$results_table_excluded) == 0) data.frame(Message="No results were excluded")           else res_data$results_table_excluded,
         "Logs" = log_df
       )
       writexl::write_xlsx(data_list, path = file)
