@@ -754,21 +754,33 @@ server <- function(input, output, session) {
     content = function(file) {
       res_data    <- results_data()
       current_log <- rv$log_data
+      
+      # Handle cases with no data
       if (is.null(res_data) || (nrow(res_data$compound_metadata) == 0 && nrow(res_data$results_table_excluded) == 0)) {
         showNotification("No data available to download.", type = "warning", duration = 5)
-        return(NULL)
+        # Create a dummy empty excel to prevent browser error if user forces download
+        tmp <- tempfile(fileext = ".xlsx")
+        writexl::write_xlsx(list("Info" = data.frame(Message = "No data available")), path = tmp)
+        file.rename(tmp, file)
+        return()
       }
+      
       log_df <- if (length(current_log) > 0) {
         data.frame(Log = current_log, stringsAsFactors = FALSE)
       } else {
         data.frame(Log = "No log data available.", stringsAsFactors = FALSE)
       }
+      
       data_list <- list(
         "Compound_Metadata" = if(nrow(res_data$compound_metadata)      == 0) data.frame(Message="No compounds found matching filter") else res_data$compound_metadata,
         "Excluded_Results"  = if(nrow(res_data$results_table_excluded) == 0) data.frame(Message="No results were excluded")           else res_data$results_table_excluded,
         "Logs" = log_df
       )
-      writexl::write_xlsx(data_list, path = file)
+      
+      # FIXED: Write to a temp file with .xlsx extension first, then move it
+      tmp <- tempfile(fileext = ".xlsx")
+      writexl::write_xlsx(data_list, path = tmp)
+      file.rename(tmp, file)
     }
   )
 }
