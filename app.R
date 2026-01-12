@@ -3,6 +3,8 @@ library(shiny)
 library(shinyjs)
 library(DT)
 library(writexl)
+library(officer)   # For Word document creation
+library(flextable) # For formatted tables in Word documents
 
 # Core processing libraries
 library(rvest)
@@ -417,6 +419,7 @@ ui <- fluidPage(
       ),
       hr(),
       downloadButton("download_excel", "Download Results (.xlsx)", class = "btn-success", style = "width: 100%;"),
+      downloadButton("download_word", "Download Results (.docx)", class = "btn-success", style = "width: 100%; margin-top: 10px;"),
       hr(),
       div(
         class = "well author-info",
@@ -764,6 +767,8 @@ server <- function(input, output, session) {
   })
   
   # --- Render Downloads ---
+  
+  # --- Download Excel Handler ---
   output$download_excel <- downloadHandler(
     filename = function() {
       paste("hmdb_results-", Sys.Date(), ".xlsx", sep = "")
@@ -803,6 +808,97 @@ server <- function(input, output, session) {
       
       # Write directly to the file path provided by Shiny
       writexl::write_xlsx(data_list, path = file)
+    }
+  )
+  
+  # --- Download Word Handler ---
+  output$download_word <- downloadHandler(
+    filename = function() {
+      paste("hmdb_results-", Sys.Date(), ".docx", sep = "")
+    },
+    content = function(file) {
+      tryCatch({
+        res_data    <- results_data()
+        current_log <- rv$log_data
+        
+        # Create a new Word document
+        doc <- officer::read_docx()
+        
+        # Add title
+        doc <- officer::body_add_par(doc, "HMDB Query Results", style = "heading 1")
+        doc <- officer::body_add_par(doc, paste("Generated:", Sys.time()), style = "Normal")
+        doc <- officer::body_add_par(doc, "", style = "Normal")  # Empty line
+        
+        # Handle cases with no data
+        if (is.null(res_data) || (nrow(res_data$compound_metadata) == 0 && nrow(res_data$results_table_excluded) == 0)) {
+          doc <- officer::body_add_par(doc, "No data available", style = "Normal")
+          print(doc, target = file)
+          return()
+        }
+        
+        # Add Compound Metadata section
+        doc <- officer::body_add_par(doc, "Compound Metadata", style = "heading 2")
+        if (!is.null(res_data$compound_metadata) && nrow(res_data$compound_metadata) > 0) {
+          # Clean data for table
+          clean_df <- as.data.frame(lapply(res_data$compound_metadata, function(x) {
+            if (is.list(x)) return(vapply(x, toString, character(1)))
+            return(as.character(x))
+          }), stringsAsFactors = FALSE)
+          
+          # Add table with better formatting
+          ft <- flextable::flextable(clean_df)
+          ft <- flextable::theme_vanilla(ft)
+          ft <- flextable::autofit(ft)
+          doc <- flextable::body_add_flextable(doc, value = ft)
+        } else {
+          doc <- officer::body_add_par(doc, "No compound metadata available", style = "Normal")
+        }
+        
+        doc <- officer::body_add_par(doc, "", style = "Normal")  # Empty line
+        
+        # Add Excluded Results section
+        doc <- officer::body_add_par(doc, "Excluded Results", style = "heading 2")
+        if (!is.null(res_data$results_table_excluded) && nrow(res_data$results_table_excluded) > 0) {
+          # Clean data for table
+          clean_df <- as.data.frame(lapply(res_data$results_table_excluded, function(x) {
+            if (is.list(x)) return(vapply(x, toString, character(1)))
+            return(as.character(x))
+          }), stringsAsFactors = FALSE)
+          
+          # Add table with better formatting
+          ft <- flextable::flextable(clean_df)
+          ft <- flextable::theme_vanilla(ft)
+          ft <- flextable::autofit(ft)
+          doc <- flextable::body_add_flextable(doc, value = ft)
+        } else {
+          doc <- officer::body_add_par(doc, "No excluded results", style = "Normal")
+        }
+        
+        doc <- officer::body_add_par(doc, "", style = "Normal")  # Empty line
+        
+        # Add Logs section
+        doc <- officer::body_add_par(doc, "Query Logs", style = "heading 2")
+        if (length(current_log) > 0) {
+          for (log_entry in current_log) {
+            doc <- officer::body_add_par(doc, log_entry, style = "Normal")
+          }
+        } else {
+          doc <- officer::body_add_par(doc, "No log data available", style = "Normal")
+        }
+        
+        # Save the document
+        print(doc, target = file)
+        
+      }, error = function(e) {
+        # Create error document if something goes wrong
+        doc <- officer::read_docx()
+        doc <- officer::body_add_par(doc, "Error Generating Report", style = "heading 1")
+        doc <- officer::body_add_par(doc, paste("An error occurred:", e$message), style = "Normal")
+        doc <- officer::body_add_par(doc, "", style = "Normal")
+        doc <- officer::body_add_par(doc, "Please try again or contact support.", style = "Normal")
+        print(doc, target = file)
+        warning(paste("Error in Word download:", e$message))
+      })
     }
   )
 }
