@@ -3,8 +3,6 @@ library(shiny)
 library(shinyjs)
 library(DT)
 library(writexl)
-library(officer)   # For Word document creation
-library(flextable) # For formatted tables in Word documents
 
 # Core processing libraries
 library(rvest)
@@ -74,7 +72,7 @@ fetch_metadata_via_scraping <- function(compound_ids) {
 }
 
 # ================================================================
-# Core Function: Query HMDB (same as original, kept intact)
+# Core Function: Query HMDB
 # ================================================================
 
 query_hmdb_ms <- function(mz_rt,
@@ -127,10 +125,10 @@ query_hmdb_ms <- function(mz_rt,
         return(list(compound_metadata = data.frame(), results_table_excluded = data.frame()))
       }
       
-      # FIXED: Parse table, flatten lists, and handle columns robustly
+      # Parse table, flatten lists, and handle columns robustly
       results_table <- rvest::html_table(results_table_node, fill = TRUE)
       
-      # SAFETY: Ensure it is a standard dataframe and flatten any list columns (common cause of write_xlsx failure)
+      # Ensure it is a standard dataframe and flatten any list columns (common cause of write_xlsx failure)
       results_table <- as.data.frame(lapply(results_table, function(x) {
         if(is.list(x)) return(as.character(x)) else return(x)
       }), stringsAsFactors = FALSE)
@@ -154,7 +152,7 @@ query_hmdb_ms <- function(mz_rt,
         results_table$`Adduct M/Z` <- trimws(stringr::str_replace(as.character(results_table$`Adduct M/Z`), "m/z calculator", ""))
       }
       
-      # SAFETY: Check if 'Adduct' column exists before filtering to prevent crash
+      # Check if 'Adduct' column exists before filtering to prevent crash
       has_adduct_col <- "Adduct" %in% colnames(results_table)
       
       if (has_adduct_col) {
@@ -329,7 +327,26 @@ ui <- fluidPage(
         }
         "
       )
-    )
+    ),
+    tags$script(HTML(
+      "
+  Shiny.addCustomMessageHandler('trigger_download', function(message) {
+    document.getElementById('download_excel').click();
+  });
+")),
+    tags$script(HTML(
+      "
+  Shiny.addCustomMessageHandler('trigger_download', function(message) {
+    document.getElementById('download_excel').click();
+  });
+  Shiny.addCustomMessageHandler('switchTab', function(message) {
+    // Force tab switch with multiple methods
+    setTimeout(function() {
+      $('a[data-value=\"Compound Metadata\"]').click();
+      $('a[data-value=\"Compound Metadata\"]').tab('show');
+    }, 50);
+  });
+"))
   ),
   
   # Sidebar Panel (Scrollable)
@@ -419,7 +436,6 @@ ui <- fluidPage(
       ),
       hr(),
       downloadButton("download_excel", "Download Results (.xlsx)", class = "btn-success", style = "width: 100%;"),
-      downloadButton("download_word", "Download Results (.docx)", class = "btn-success", style = "width: 100%; margin-top: 10px;"),
       hr(),
       div(
         class = "well author-info",
@@ -447,11 +463,14 @@ ui <- fluidPage(
       tabsetPanel(
         id = "main_tabs",
         tabPanel("Compound Metadata",
-                 h4("Filtered Compound Metadata (Draggable columns, sortable)"),
+                 h4("Filtered Compound Metadata"),
                  DT::DTOutput("compound_metadata_table")),
         tabPanel("Excluded Results",
                  h4("Excluded Results Table (Adducts Not Filtered)"),
                  DT::DTOutput("excluded_results_table")),
+        tabPanel("Logs",
+                 h4("Query Log (Real-time update)"),
+                 verbatimTextOutput("query_log")),
         tabPanel("Help",
                  div(class = "help-content",
                      h3("Overview"),
@@ -499,6 +518,13 @@ ui <- fluidPage(
                      ),
                      p("The default adducts selected by this app when you change Ion Mode are a curated list of the most common adducts from the lists above."),
                      
+                     h3("Output Tabs"),
+                     tags$ul(
+                       tags$li(strong("Compound Metadata:"), " Shows compounds that matched your search criteria AND your selected adducts. Includes detailed metadata from HMDB."),
+                       tags$li(strong("Excluded Results:"), " Shows compounds that matched your search criteria but were filtered out because their adducts did not match your 'Adducts to Keep' list."),
+                       tags$li(strong("Logs:"), " Shows a detailed, timestamped log of the entire query process, updated in real-time.")
+                     ),
+                     
                      h3("R Packages Used"),
                      p("This application uses the following R packages:"),
                      tags$ul(
@@ -516,12 +542,6 @@ ui <- fluidPage(
                        tags$li(code("furrr"), " - Parallel mapping with purrr"),
                        tags$li(code("later"), " - Deferred execution")
                      ),
-                     h3("Output Tabs"),
-                     tags$ul(
-                       tags$li(strong("Compound Metadata:"), " Shows compounds that matched your search criteria AND your selected adducts. Includes detailed metadata from HMDB."),
-                       tags$li(strong("Excluded Results:"), " Shows compounds that matched your search criteria but were filtered out because their adducts did not match your 'Adducts to Keep' list."),
-                       tags$li(strong("Logs:"), " Shows a detailed, timestamped log of the entire query process, updated in real-time.")
-                     ),
                      
                      # Note-box after Output Tabs
                      div(class = "note-box",
@@ -532,10 +552,7 @@ ui <- fluidPage(
                          )
                      )
                  )
-        ),
-        tabPanel("Logs",
-                 h4("Query Log (Real-time update)"),
-                 verbatimTextOutput("query_log"))
+        )
       )
   )
 )
@@ -558,8 +575,10 @@ server <- function(input, output, session) {
   )
   
   append_log <- function(msg) {
-    current_log <- rv$log_data
-    rv$log_data <- c(current_log, msg)
+    isolate({
+      current_log <- rv$log_data
+      rv$log_data <- c(current_log, msg)
+    })
   }
   
   positive_adducts <- c("M+H", "M+H-2H2O", "M+H-H2O", "M+Na", "M+CH3OH+H", "M+K", "M+ACN+H", "M+2Na-H", "M+ACN+Na", "M+2K-H", "M+2ACN+H", "M+H+HCOONa", "2M+H", "2M+Na", "2M+2H+3H2O", "2M+K", "2M+ACN+H", "2M+ACN+Na", "2M+H-H2O", "M+2H", "M+H+Na", "M+H+K", "M+ACN+2H", "M+2Na", "M+2ACN+2H", "M+3ACN+2H", "M+3H", "M+2H+Na", "M+H+2Na", "M+3Na", "M+H+2K")
@@ -615,6 +634,11 @@ server <- function(input, output, session) {
   
   # --- Main Query Logic (Blocking) ---
   results_data <- eventReactive(input$run_query, {
+    
+    # Force immediate UI update to switch tab and show loading
+    isolate({
+      session$sendCustomMessage(type = 'switchTab', message = list())
+    })
     
     # 1. Setup State and UI
     req(input$mz_rt_input)
@@ -702,6 +726,14 @@ server <- function(input, output, session) {
       rv$query_successful <- TRUE
       rv$results_data     <- res    # Set the final results
       rv$query_error      <- FALSE
+      
+      # Auto-download Excel if there is valid data
+      if (!is.null(res$compound_metadata) && nrow(res$compound_metadata) > 0) {
+        later::later(function() {
+          session$sendCustomMessage(type = 'trigger_download', message = list())
+        }, delay = 0.5)
+      }
+      
       return(res)                   # return results to results_data()
     }
   })
@@ -719,8 +751,11 @@ server <- function(input, output, session) {
   observe({
     has_features <- !is.null(input$mz_rt_input) && nchar(trimws(input$mz_rt_input)) > 0
     
-    # Only toggle the run button based on running state and feature input
+    # Toggle run button based on running state and feature input
     shinyjs::toggleState("run_query", !rv$is_running && has_features)
+    
+    # Toggle download button based on whether query was successful
+    shinyjs::toggleState("download_excel", rv$query_successful && !rv$is_running)
   })
   
   # --- Render Outputs ---
@@ -766,7 +801,7 @@ server <- function(input, output, session) {
     )
   })
   
-  # --- Render Downloads ---
+  # --- Render Download ---
   
   # --- Download Excel Handler ---
   output$download_excel <- downloadHandler(
@@ -808,97 +843,6 @@ server <- function(input, output, session) {
       
       # Write directly to the file path provided by Shiny
       writexl::write_xlsx(data_list, path = file)
-    }
-  )
-  
-  # --- Download Word Handler ---
-  output$download_word <- downloadHandler(
-    filename = function() {
-      paste("hmdb_results-", Sys.Date(), ".docx", sep = "")
-    },
-    content = function(file) {
-      tryCatch({
-        res_data    <- results_data()
-        current_log <- rv$log_data
-        
-        # Create a new Word document
-        doc <- officer::read_docx()
-        
-        # Add title
-        doc <- officer::body_add_par(doc, "HMDB Query Results", style = "heading 1")
-        doc <- officer::body_add_par(doc, paste("Generated:", Sys.time()), style = "Normal")
-        doc <- officer::body_add_par(doc, "", style = "Normal")  # Empty line
-        
-        # Handle cases with no data
-        if (is.null(res_data) || (nrow(res_data$compound_metadata) == 0 && nrow(res_data$results_table_excluded) == 0)) {
-          doc <- officer::body_add_par(doc, "No data available", style = "Normal")
-          print(doc, target = file)
-          return()
-        }
-        
-        # Add Compound Metadata section
-        doc <- officer::body_add_par(doc, "Compound Metadata", style = "heading 2")
-        if (!is.null(res_data$compound_metadata) && nrow(res_data$compound_metadata) > 0) {
-          # Clean data for table
-          clean_df <- as.data.frame(lapply(res_data$compound_metadata, function(x) {
-            if (is.list(x)) return(vapply(x, toString, character(1)))
-            return(as.character(x))
-          }), stringsAsFactors = FALSE)
-          
-          # Add table with better formatting
-          ft <- flextable::flextable(clean_df)
-          ft <- flextable::theme_vanilla(ft)
-          ft <- flextable::autofit(ft)
-          doc <- flextable::body_add_flextable(doc, value = ft)
-        } else {
-          doc <- officer::body_add_par(doc, "No compound metadata available", style = "Normal")
-        }
-        
-        doc <- officer::body_add_par(doc, "", style = "Normal")  # Empty line
-        
-        # Add Excluded Results section
-        doc <- officer::body_add_par(doc, "Excluded Results", style = "heading 2")
-        if (!is.null(res_data$results_table_excluded) && nrow(res_data$results_table_excluded) > 0) {
-          # Clean data for table
-          clean_df <- as.data.frame(lapply(res_data$results_table_excluded, function(x) {
-            if (is.list(x)) return(vapply(x, toString, character(1)))
-            return(as.character(x))
-          }), stringsAsFactors = FALSE)
-          
-          # Add table with better formatting
-          ft <- flextable::flextable(clean_df)
-          ft <- flextable::theme_vanilla(ft)
-          ft <- flextable::autofit(ft)
-          doc <- flextable::body_add_flextable(doc, value = ft)
-        } else {
-          doc <- officer::body_add_par(doc, "No excluded results", style = "Normal")
-        }
-        
-        doc <- officer::body_add_par(doc, "", style = "Normal")  # Empty line
-        
-        # Add Logs section
-        doc <- officer::body_add_par(doc, "Query Logs", style = "heading 2")
-        if (length(current_log) > 0) {
-          for (log_entry in current_log) {
-            doc <- officer::body_add_par(doc, log_entry, style = "Normal")
-          }
-        } else {
-          doc <- officer::body_add_par(doc, "No log data available", style = "Normal")
-        }
-        
-        # Save the document
-        print(doc, target = file)
-        
-      }, error = function(e) {
-        # Create error document if something goes wrong
-        doc <- officer::read_docx()
-        doc <- officer::body_add_par(doc, "Error Generating Report", style = "heading 1")
-        doc <- officer::body_add_par(doc, paste("An error occurred:", e$message), style = "Normal")
-        doc <- officer::body_add_par(doc, "", style = "Normal")
-        doc <- officer::body_add_par(doc, "Please try again or contact support.", style = "Normal")
-        print(doc, target = file)
-        warning(paste("Error in Word download:", e$message))
-      })
     }
   )
 }
